@@ -1,0 +1,55 @@
+sort -k1,1 -k2,2n -k3,3n dup.bed > dup.sorted.bed
+
+uniq dup.sorted.bed > dup.unique.bed
+
+bedtools intersect \
+-a dup.unique.bed \
+-b dup.unique.bed \
+-f 0.75 \
+-r \
+-wa -wb \
+> dup.overlap.txt
+
+awk '$5 != $11' dup.overlap.txt > dup.overlap.noself.txt
+
+awk '{print $5"\t"$11}' dup.overlap.noself.txt > dup.edges.txt
+
+nano cluster_dup.py
+import networkx as nx
+
+G = nx.read_edgelist("dup.edges.txt")
+
+components = list(nx.connected_components(G))
+
+with open("dup.clusters.txt", "w") as out:
+    for i, comp in enumerate(components, 1):
+        for node in comp:
+            out.write(f"{node}\tCNVR_{i}\n")
+
+python cluster_dup.py
+
+join -1 5 -2 1 \
+<(sort -k5,5 dup.unique.bed) \
+<(sort -k1,1 dup.clusters.txt) \
+| awk 'BEGIN{OFS="\t"}{print $2,$3,$4,$5,$6,$1,$7}' \
+> dup.clustered.txt
+
+awk 'BEGIN{OFS="\t"}
+{
+  c=$7
+
+  if(!(c in min) || $2<min[c]) min[c]=$2
+  if(!(c in max) || $3>max[c]) max[c]=$3
+
+  chr[c]=$1
+  type[c]=$4
+  n[c]++
+  ids[c]=(ids[c]?ids[c]","$5:$5)
+  vecs[c]=(vecs[c]?vecs[c]","$6:$6)
+}
+END{
+  for(c in min)
+    print chr[c],min[c],max[c],type[c],c,n[c],ids[c],vecs[c]
+}' dup.clustered.txt \
+| sort -k1,1 -k2,2n -k3,3n \
+> DUP_CNVRs.bed
